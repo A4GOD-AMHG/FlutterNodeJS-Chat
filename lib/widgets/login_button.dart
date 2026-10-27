@@ -2,33 +2,26 @@ import 'package:flutter/material.dart';
 
 class LoginButton extends StatelessWidget {
   final String text;
-  final void Function()? onPressed;
+  final VoidCallback? onPressed;
+  final bool loading;
 
   const LoginButton({
-    Key? key,
+    super.key,
     required this.text,
     required this.onPressed,
-  }) : super(key: key);
+    this.loading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return ElevatedButton(
-      style: ButtonStyle(
-        elevation: MaterialStateProperty.all(2),
-        backgroundColor: MaterialStateProperty.all(Colors.blue),
-        shape: MaterialStateProperty.all(const StadiumBorder()),
-      ),
-      onPressed: onPressed,
-      child: SizedBox(
-        width: double.infinity,
-        height: 55,
-        child: Center(
-          child: Text(
-            text,
-            style: const TextStyle(fontSize: 17),
-          ),
-        ),
-      ),
+    return FilledButton(
+      onPressed: loading ? null : onPressed,
+      child: loading
+          ? const SizedBox.square(
+              dimension: 22,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            )
+          : Text(text),
     );
   }
 }

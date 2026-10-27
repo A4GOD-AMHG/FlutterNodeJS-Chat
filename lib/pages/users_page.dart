@@ -3,142 +3,147 @@ import 'package:chat/services/auth_service.dart';
 import 'package:chat/services/chat_service.dart';
 import 'package:chat/services/socket_service.dart';
 import 'package:chat/services/users_service.dart';
+import 'package:chat/widgets/user_avatar.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:pull_to_refresh/pull_to_refresh.dart';
 
 class UsersPage extends StatefulWidget {
-  const UsersPage({Key? key}) : super(key: key);
+  const UsersPage({super.key});
 
   @override
   State<UsersPage> createState() => _UsersPageState();
 }
 
 class _UsersPageState extends State<UsersPage> {
-  final RefreshController _refreshController =
-      RefreshController(initialRefresh: false);
-
   final userService = UsersService();
 
   List<User> users = [];
   List<String?> _lastMessages = [];
+  bool _loading = true;
 
   @override
   void initState() {
-    _loadUsers();
     super.initState();
+    _loadUsers();
+  }
+
+  Future<void> _loadUsers() async {
+    final chatService = context.read<ChatService>();
+    final myUid = context.read<AuthService>().user?.uid;
+
+    final loaded = await userService.getUsers();
+    final lasts = await Future.wait(loaded.map((u) => chatService.getLast(u.uid)));
+    if (!mounted) return;
+
+    setState(() {
+      users = loaded;
+      _lastMessages = lasts
+          .map((m) => m == null
+              ? null
+              : m.from == myUid
+                  ? 'Tú: ${m.message}'
+                  : m.message)
+          .toList();
+      _loading = false;
+    });
+  }
+
+  Future<void> _logout() async {
+    context.read<SocketService>().disconnect();
+    await context.read<AuthService>().logout();
+    if (!mounted) return;
+    Navigator.pushReplacementNamed(context, 'login');
   }
 
   @override
   Widget build(BuildContext context) {
-    final authService = Provider.of<AuthService>(context);
-    final socketService = Provider.of<SocketService>(context);
+    final user = context.watch<AuthService>().user;
+    final online =
+        context.watch<SocketService>().serverStatus == ServerStatus.Online;
+    final colors = Theme.of(context).colorScheme;
 
-    final user = authService.user;
     return Scaffold(
       appBar: AppBar(
-        title: Text(
-          user!.name,
-          style: const TextStyle(color: Colors.black54),
-        ),
-        elevation: 1,
-        backgroundColor: Colors.white,
-        leading: IconButton(
-          onPressed: () {
-            socketService.disconnect();
-            Navigator.pushReplacementNamed(context, 'login');
-            AuthService.deleteToken();
-          },
-          icon: const Icon(Icons.exit_to_app, color: Colors.black54),
-        ),
-        actions: [
-          Container(
-            margin: const EdgeInsets.only(right: 10),
-            child: socketService.serverStatus == ServerStatus.Online
-                ? Icon(
-                    Icons.check_circle,
-                    color: Colors.blue[400],
-                  )
-                : const Icon(
-                    Icons.check_circle,
-                    color: Colors.red,
+        titleSpacing: 0,
+        title: Row(
+          children: [
+            UserAvatar(name: user?.name ?? '', online: online, radius: 18),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(user?.name ?? '',
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w600)),
+                  Text(
+                    online ? 'Conectado' : 'Sin conexión',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: online ? Colors.green : colors.error),
                   ),
-          )
-        ],
-      ),
-      body: SmartRefresher(
-        controller: _refreshController,
-        enablePullDown: true,
-        onRefresh: _loadUsers,
-        header: WaterDropHeader(
-          complete: Icon(
-            Icons.check,
-            color: Colors.blue[400],
-          ),
-          waterDropColor: Colors.blue[400]!,
+                ],
+              ),
+            ),
+          ],
         ),
-        child: _listViewUsers(),
+        leading: IconButton(
+          tooltip: 'Cerrar sesión',
+          onPressed: _logout,
+          icon: const Icon(Icons.logout),
+        ),
       ),
+      body: _loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: _loadUsers,
+              child: users.isEmpty ? _emptyState(colors) : _listViewUsers(),
+            ),
     );
   }
 
-  ListView _listViewUsers() {
-    return ListView.separated(
-      physics: const BouncingScrollPhysics(),
-      itemBuilder: (_, i) => _usuarioListTile(users[i], i),
-      separatorBuilder: (_, i) => const Divider(),
+  Widget _emptyState(ColorScheme colors) {
+    // ListView keeps pull-to-refresh working when there is nothing to show.
+    return ListView(
+      physics: const AlwaysScrollableScrollPhysics(),
+      children: [
+        const SizedBox(height: 160),
+        Icon(Icons.people_outline, size: 64, color: colors.outline),
+        const SizedBox(height: 12),
+        Text(
+          'No hay usuarios todavía',
+          textAlign: TextAlign.center,
+          style: TextStyle(color: colors.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+
+  Widget _listViewUsers() {
+    return ListView.builder(
+      physics: const AlwaysScrollableScrollPhysics(
+          parent: BouncingScrollPhysics()),
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      itemBuilder: (_, i) => _userListTile(users[i], _lastMessages[i]),
       itemCount: users.length,
     );
   }
 
-  ListTile _usuarioListTile(User user, int index) {
+  Widget _userListTile(User user, String? lastMessage) {
     return ListTile(
-      title: Text(user.name),
-      subtitle: Text(user.email +
-          '\n' +
-          (_lastMessages.isNotEmpty ? _lastMessages[index] ?? '' : '')),
-      leading: CircleAvatar(
-        child: Text(user.name.substring(0, 2)),
-        backgroundColor: Colors.blue[100],
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+      leading: UserAvatar(name: user.name, online: user.online),
+      title: Text(user.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+      subtitle: Text(
+        lastMessage ?? user.email,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
       ),
-      trailing: Container(
-        width: 10,
-        height: 10,
-        decoration: BoxDecoration(
-            color: user.online ? Colors.green[300] : Colors.red,
-            borderRadius: BorderRadius.circular(100)),
-      ),
+      trailing: const Icon(Icons.chevron_right),
       onTap: () {
-        final chatService = Provider.of<ChatService>(context, listen: false);
-        chatService.userFor = user;
+        context.read<ChatService>().userFor = user;
         Navigator.pushReplacementNamed(context, 'chat');
       },
     );
-  }
-
-  Future<void> asyncFor(
-      int index, int max, Future<void> Function(int) forBody) {
-    if (index >= max) {
-      return Future.value();
-    }
-    return forBody(index).then((_) => asyncFor(index + 1, max, forBody));
-  }
-
-  void _loadUsers() async {
-    final chatService = Provider.of<ChatService>(context, listen: false);
-    final authService = Provider.of<AuthService>(context, listen: false);
-    users = await userService.getUsers();
-    _lastMessages.addAll(List.filled(users.length, null));
-    await asyncFor(0, users.length, (i) {
-      return chatService.getLast(users[i].uid).then((value) {
-        if (value != null)
-          _lastMessages[i] =
-              '${value.from == authService.user!.uid ? 'Tu: ${value.message}' : '${value.message}'}';
-      });
-    });
-
-    setState(() {});
-
-    _refreshController.refreshCompleted();
   }
 }

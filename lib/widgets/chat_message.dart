@@ -1,74 +1,87 @@
-import 'package:chat/services/auth_service.dart';
-import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'package:provider/provider.dart';
 
-// ignore: must_be_immutable
 class ChatMessage extends StatelessWidget {
   final String id;
   final String text;
   final String uid;
+  final bool isMyMessage;
+  final DateTime? time;
   final AnimationController animationController;
-  bool isMyMessage = false;
 
-  ChatMessage(
-      {Key? key,
-      required this.id,
-      required this.text,
-      required this.uid,
-      this.isMyMessage = true,
-      required this.animationController})
-      : super(key: key);
+  const ChatMessage({
+    super.key,
+    required this.id,
+    required this.text,
+    required this.uid,
+    required this.isMyMessage,
+    required this.animationController,
+    this.time,
+  });
+
+  ChatMessage copyWith({String? text, AnimationController? animationController}) {
+    return ChatMessage(
+      id: id,
+      text: text ?? this.text,
+      uid: uid,
+      isMyMessage: isMyMessage,
+      time: time,
+      animationController: animationController ?? this.animationController,
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
-    final authService = Provider.of<AuthService>(context, listen: false);
-    isMyMessage = uid == authService.user!.uid;
+    final colors = Theme.of(context).colorScheme;
+    final bg = isMyMessage ? colors.primary : colors.surfaceContainerHighest;
+    final fg = isMyMessage ? colors.onPrimary : colors.onSurface;
+    const r = Radius.circular(18);
+    const tail = Radius.circular(4);
+
     return FadeTransition(
       opacity: animationController,
       child: SizeTransition(
         sizeFactor:
             CurvedAnimation(parent: animationController, curve: Curves.easeOut),
-        child: Container(
-          child: isMyMessage ? _myMessage() : _notMyMessage(),
+        child: Align(
+          alignment:
+              isMyMessage ? Alignment.centerRight : Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+                maxWidth: MediaQuery.sizeOf(context).width * 0.75),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 10, 14, 8),
+              margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 3),
+              decoration: BoxDecoration(
+                color: bg,
+                borderRadius: BorderRadius.only(
+                  topLeft: r,
+                  topRight: r,
+                  bottomLeft: isMyMessage ? r : tail,
+                  bottomRight: isMyMessage ? tail : r,
+                ),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(text, style: TextStyle(color: fg, fontSize: 15)),
+                  if (time != null) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      _formatTime(time!.toLocal()),
+                      style: TextStyle(
+                          color: fg.withValues(alpha: 0.7), fontSize: 11),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 
-  Widget _myMessage() {
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        margin: const EdgeInsets.only(bottom: 5, left: 50, right: 5),
-        child: Text(
-          text,
-          style: const TextStyle(color: Colors.white),
-        ),
-        decoration: BoxDecoration(
-          color: const Color(0xff4D9EF6),
-          borderRadius: BorderRadius.circular(20),
-        ),
-      ),
-    );
-  }
-
-  Widget _notMyMessage() {
-    return Align(
-      alignment: Alignment.centerLeft,
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        margin: const EdgeInsets.only(bottom: 5, right: 50, left: 5),
-        child: Text(
-          text,
-          style: const TextStyle(color: Colors.black87),
-        ),
-        decoration: BoxDecoration(
-          color: const Color(0xffE4E5E8),
-          borderRadius: BorderRadius.circular(20),
-        ),
-      ),
-    );
-  }
+  static String _formatTime(DateTime t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 }

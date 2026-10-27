@@ -1,13 +1,14 @@
 import 'dart:io';
 
 class Environment {
-  static String apiUrl = 'https://flutterchat-socket-server.herokuapp.com/api';
-  // Platform.isAndroid
-  //     ? 'http://10.0.2.2:3000/api'
-  //     : 'http://localhost:3000/api';
+  // Override with: flutter run --dart-define=SERVER_URL=https://my-server.com
+  static const _serverUrl = String.fromEnvironment('SERVER_URL');
 
-  static String socketUrl = 'https://flutterchat-socket-server.herokuapp.com';
-  // Platform.isAndroid ? 'http://10.0.2.2:3000' : 'http://localhost:3000';
+  static String get socketUrl => _serverUrl.isNotEmpty
+      ? _serverUrl
+      : Platform.isAndroid
+          ? 'http://10.0.2.2:3000'
+          : 'http://localhost:3000';
 
-  static String socketUrlAuthority = 'flutterchat-socket-server.herokuapp.com';
+  static String get apiUrl => '$socketUrl/api';
 }

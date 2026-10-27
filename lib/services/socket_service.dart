@@ -1,6 +1,6 @@
 // ignore_for_file: constant_identifier_names
 
-import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 // ignore: library_prefixes
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 
@@ -11,17 +11,21 @@ enum ServerStatus { Online, Offline, Connecting }
 
 class SocketService with ChangeNotifier {
   ServerStatus _serverStatus = ServerStatus.Connecting;
-  late IO.Socket _socket;
+  IO.Socket? _socket;
 
   ServerStatus get serverStatus => _serverStatus;
 
-  IO.Socket get socket => _socket;
-  Function get emit => _socket.emit;
+  IO.Socket? get socket => _socket;
 
-  void connect() async {
+  void emit(String event, dynamic data) => _socket?.emit(event, data);
+
+  Future<void> connect() async {
     final token = await AuthService.getToken();
 
-    // Dart client
+    // Never keep two sockets alive (e.g. logout + login again).
+    _socket?.dispose();
+    _serverStatus = ServerStatus.Connecting;
+
     _socket = IO.io(Environment.socketUrl, {
       'transports': ['websocket'],
       'autoConnect': true,
@@ -29,20 +33,21 @@ class SocketService with ChangeNotifier {
       'extraHeaders': {'x-token': token}
     });
 
-    _socket.onConnect((_) {
+    _socket!.onConnect((_) {
       _serverStatus = ServerStatus.Online;
-      print('Online');
       notifyListeners();
     });
 
-    _socket.onDisconnect((_) {
+    _socket!.onDisconnect((_) {
       _serverStatus = ServerStatus.Offline;
-      print('Offline');
       notifyListeners();
     });
   }
 
   void disconnect() {
-    _socket.disconnect();
+    _socket?.dispose();
+    _socket = null;
+    _serverStatus = ServerStatus.Offline;
+    notifyListeners();
   }
 }

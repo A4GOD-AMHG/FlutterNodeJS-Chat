@@ -11,7 +11,7 @@ class AuthService with ChangeNotifier {
   User? user;
   bool _authenticating = false;
 
-  final _storage = const FlutterSecureStorage();
+  static const _storage = FlutterSecureStorage();
 
   bool get authenticating => _authenticating;
 
@@ -20,105 +20,96 @@ class AuthService with ChangeNotifier {
     notifyListeners();
   }
 
-  static Future<String?> getToken() async {
-    const _storage = FlutterSecureStorage();
-    final token = await _storage.read(key: 'token');
-    return token;
-  }
+  static Future<String?> getToken() => _storage.read(key: 'token');
 
-  static Future<void> deleteToken() async {
-    const _storage = FlutterSecureStorage();
-    await _storage.delete(key: 'token');
-  }
+  static Future<void> deleteToken() => _storage.delete(key: 'token');
+
+  /// JSON headers including the stored session token.
+  static Future<Map<String, String>> authHeaders() async => {
+        'Content-Type': 'application/json',
+        'x-token': await getToken() ?? '',
+      };
 
   Future<bool> login(String email, String password) async {
-    authenticating = true;
-
-    final data = {
-      'email': email,
-      'password': password,
-    };
-
-    final resp = await http.post(
-      Uri.parse('${Environment.apiUrl}/login'),
-      // Uri.https('${Environment.socketUrlAuthority}', '/api/login'),
-      body: jsonEncode(data),
-      headers: {'Content-Type': 'application/json'},
-    );
-
-    authenticating = false;
-    if (resp.statusCode == 200) {
-      final loginResponse = loginResponseFromJson(resp.body);
-      user = loginResponse.user;
-
-      await _saveToken(loginResponse.token);
-
-      return true;
-    } else {
-      return false;
-    }
+    return await _authenticate('login', {
+          'email': email,
+          'password': password,
+        }) ==
+        null;
   }
 
-  Future register(String name, String email, String password) async {
-    authenticating = true;
-
-    final data = {
+  /// Returns null on success or an error message to show the user.
+  Future<String?> register(String name, String email, String password) {
+    return _authenticate('login/new', {
       'name': name,
       'email': email,
       'password': password,
-    };
+    });
+  }
 
-    final resp = await http.post(
-      Uri.parse('${Environment.apiUrl}/login/new'),
-      // Uri.https('${Environment.socketUrlAuthority}', '/api/login/new'),
-      body: jsonEncode(data),
-      headers: {'Content-Type': 'application/json'},
-    );
+  Future<String?> _authenticate(String path, Map<String, String> data) async {
+    authenticating = true;
+    try {
+      final resp = await http.post(
+        Uri.parse('${Environment.apiUrl}/$path'),
+        body: jsonEncode(data),
+        headers: {'Content-Type': 'application/json'},
+      );
 
-    authenticating = false;
-    if (resp.statusCode == 200) {
-      final loginResponse = loginResponseFromJson(resp.body);
-      user = loginResponse.user;
-
-      await _saveToken(loginResponse.token);
-
-      return true;
-    } else {
-      final respBody = jsonDecode(resp.body);
-      return respBody['msg'];
+      if (resp.statusCode == 200) {
+        final loginResponse = loginResponseFromJson(resp.body);
+        user = loginResponse.user;
+        await _saveToken(loginResponse.token);
+        return null;
+      }
+      return _errorMessage(resp.body);
+    } catch (_) {
+      return 'No se pudo conectar con el servidor';
+    } finally {
+      authenticating = false;
     }
+  }
+
+  /// Server errors come as { msg } or as express-validator { errors: { field: { msg } } }.
+  static String _errorMessage(String body) {
+    try {
+      final json = jsonDecode(body);
+      if (json['msg'] is String) return json['msg'];
+      final errors = json['errors'];
+      if (errors is Map && errors.isNotEmpty) {
+        return errors.values.first['msg'] ?? 'Datos no válidos';
+      }
+    } catch (_) {}
+    return 'Ocurrió un error inesperado';
   }
 
   Future<bool> isLoggedIn() async {
-    final token = await _storage.read(key: 'token');
+    final token = await getToken();
+    if (token == null) return false;
 
-    final resp = await http.get(
-      Uri.parse('${Environment.apiUrl}/login/renew'),
-      // Uri.https('${Environment.socketUrlAuthority}', '/api/login/renew'),
-      headers: {
-        'Content-Type': 'application/json',
-        'x-token': token ?? '',
-      },
-    );
+    try {
+      final resp = await http.get(
+        Uri.parse('${Environment.apiUrl}/login/renew'),
+        headers: {'Content-Type': 'application/json', 'x-token': token},
+      );
 
-    if (resp.statusCode == 200) {
-      final loginResponse = loginResponseFromJson(resp.body);
-      user = loginResponse.user;
+      if (resp.statusCode == 200) {
+        final loginResponse = loginResponseFromJson(resp.body);
+        user = loginResponse.user;
+        await _saveToken(loginResponse.token);
+        return true;
+      }
+    } catch (_) {}
 
-      await _saveToken(loginResponse.token);
-
-      return true;
-    } else {
-      logout();
-      return false;
-    }
+    await logout();
+    return false;
   }
 
-  Future _saveToken(String token) async {
-    return await _storage.write(key: 'token', value: token);
-  }
+  Future<void> _saveToken(String token) =>
+      _storage.write(key: 'token', value: token);
 
-  Future logout() async {
-    await _storage.delete(key: 'token');
+  Future<void> logout() async {
+    user = null;
+    await deleteToken();
   }
 }
